@@ -1,0 +1,153 @@
+/* base.css — Silver Command Center */
+/* CSS reset + design tokens + utility foundation */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  /* ── Color Tokens (Dark Charcoal Theme) ── */
+  --bg-base: #0f1117;
+  --bg-surface: #171b24;
+  --bg-card: #1e2330;
+  --bg-card-hover: #232840;
+  --bg-highlight: #252d3d;
+
+  --border-subtle: rgba(255,255,255,0.06);
+  --border-default: rgba(255,255,255,0.10);
+  --border-strong: rgba(255,255,255,0.18);
+
+  --text-primary: #eef0f5;
+  --text-secondary: #9aa3b5;
+  --text-muted: #5a6175;
+  --text-inverse: #0f1117;
+
+  /* ── Signal Colors ── */
+  --green: #22c55e;
+  --green-bg: rgba(34, 197, 94, 0.10);
+  --green-border: rgba(34, 197, 94, 0.25);
+
+  --red: #ef4444;
+  --red-bg: rgba(239, 68, 68, 0.10);
+  --red-border: rgba(239, 68, 68, 0.25);
+
+  --yellow: #f59e0b;
+  --yellow-bg: rgba(245, 158, 11, 0.10);
+  --yellow-border: rgba(245, 158, 11, 0.25);
+
+  --blue: #3b82f6;
+  --blue-bg: rgba(59, 130, 246, 0.10);
+  --blue-border: rgba(59, 130, 246, 0.25);
+
+  /* Silver accent */
+  --silver: #c0c8d8;
+  --silver-bg: rgba(192, 200, 216, 0.08);
+  --silver-border: rgba(192, 200, 216, 0.20);
+
+  /* ── Typography ── */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+
+  --text-xs: 0.6875rem;    /* 11px */
+  --text-sm: 0.75rem;      /* 12px */
+  --text-base: 0.875rem;   /* 14px */
+  --text-md: 1rem;         /* 16px */
+  --text-lg: 1.125rem;     /* 18px */
+  --text-xl: 1.375rem;     /* 22px */
+  --text-2xl: 1.75rem;     /* 28px */
+  --text-3xl: 2.25rem;     /* 36px */
+
+  /* ── Spacing ── */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+
+  /* ── Radius ── */
+  --r-sm: 4px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+
+  /* ── Shadows ── */
+  --shadow-card: 0 1px 3px rgba(0,0,0,0.4), 0 4px 12px rgba(0,0,0,0.25);
+  --shadow-elevated: 0 4px 16px rgba(0,0,0,0.5), 0 1px 4px rgba(0,0,0,0.3);
+
+  /* ── Transition ── */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 120ms;
+  --duration-normal: 180ms;
+}
+
+html {
+  font-size: 16px;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: var(--bg-base);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: 'kern' 1, 'liga' 1;
+}
+
+/* Tabular numbers for data */
+[data-num], .num {
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+/* Scrollbar styling */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+*::-webkit-scrollbar { width: 6px; height: 6px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+*::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+
+/* Focus styles */
+:focus-visible {
+  outline: 2px solid var(--silver);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+/* Selection */
+::selection {
+  background: rgba(192, 200, 216, 0.2);
+  color: var(--text-primary);
+}
+
+/* Links */
+a {
+  color: var(--silver);
+  text-decoration: none;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+a:hover { color: var(--text-primary); }
+
+/* Utility classes */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0,0,0,0);
+  white-space: nowrap;
+  border-width: 0;
+}

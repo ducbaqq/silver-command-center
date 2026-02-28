@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Silver Command Center</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="base.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div class="layout">
+
+  <!-- ── Header ── -->
+  <header class="header">
+    <div class="header__logo">
+      <!-- Logo: inline SVG -->
+      <svg class="header__logo-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <circle cx="16" cy="16" r="15" stroke="#c0c8d8" stroke-width="1.5" fill="none"/>
+        <circle cx="16" cy="16" r="10" fill="rgba(192,200,216,0.08)" stroke="#c0c8d8" stroke-width="1"/>
+        <path d="M11 20.5 L16 10 L21 20.5" stroke="#c0c8d8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        <line x1="12.5" y1="17.5" x2="19.5" y2="17.5" stroke="#c0c8d8" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+      <div>
+        <div class="header__title">Silver Command Center</div>
+        <div class="header__subtitle">Real-time market intelligence</div>
+      </div>
+    </div>
+
+    <div class="header__meta">
+      <span class="header__updated">
+        <span class="header__status-dot loading" id="status-dot"></span>
+        <span id="last-updated-text">Initializing...</span>
+      </span>
+      <button class="btn btn--primary" id="refresh-btn" onclick="triggerRefresh()" title="Fetch latest data from all sources">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M10.5 6A4.5 4.5 0 1 1 6 1.5c1.2 0 2.3.47 3.1 1.25L10.5 4"/>
+          <path d="M10.5 1.5v2.5H8"/>
+        </svg>
+        Refresh
+      </button>
+      <button class="btn btn--grok" id="grok-btn" onclick="openGrok()" title="Analyze current data with Grok AI">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M6 1L7.5 4.5L11 5L8.5 7.5L9.5 11L6 9L2.5 11L3.5 7.5L1 5L4.5 4.5Z"/>
+        </svg>
+        Ask Grok
+      </button>
+    </div>
+  </header>
+
+  <!-- ── Main ── -->
+  <main class="main" id="main-content">
+
+    <!-- Loading state -->
+    <div class="loading-overlay" id="loading-state">
+      <div class="spinner"></div>
+      <div>Fetching market data from all sources...</div>
+    </div>
+
+    <!-- Error state -->
+    <div class="error-state" id="error-state" style="display:none; margin-bottom: var(--sp-5);">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+        <circle cx="8" cy="8" r="7"/>
+        <line x1="8" y1="5" x2="8" y2="8"/>
+        <circle cx="8" cy="11" r="0.5" fill="currentColor"/>
+      </svg>
+      <span id="error-message">Failed to load data. The server may still be initializing — try refreshing in a moment.</span>
+    </div>
+
+    <!-- Dashboard content (hidden until data loads) -->
+    <div id="dashboard-content" style="display:none;">
+
+      <!-- ── Price Hero ── -->
+      <div class="price-hero">
+        <div class="price-hero__left">
+          <div class="price-hero__label">XAG/USD · Silver Spot Price</div>
+          <div class="price-hero__price" id="price-spot">$—</div>
+          <div class="price-hero__change" id="price-change-row">
+            <span id="price-change-arrow"></span>
+            <span id="price-change-val">—</span>
+            <span id="price-change-pct"></span>
+            <span class="text-muted" style="font-weight:400; font-size:var(--text-xs); margin-left:4px;">today</span>
+          </div>
+        </div>
+        <div class="price-hero__stats">
+          <div class="price-stat">
+            <div class="price-stat__label">Gold/Silver Ratio</div>
+            <div class="price-stat__value" id="gsr">—</div>
+          </div>
+          <div class="price-stat">
+            <div class="price-stat__label">Gold Price</div>
+            <div class="price-stat__value" id="gold-price">—</div>
+          </div>
+          <div class="price-stat">
+            <div class="price-stat__label">All-Time High</div>
+            <div class="price-stat__value" id="ath">—</div>
+          </div>
+          <div class="price-stat">
+            <div class="price-stat__label">Signal</div>
+            <div style="margin-top:2px;">
+              <span class="signal-badge signal-badge--hold" id="signal-badge-hero">HOLD</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Row 1: Signal + Technicals ── -->
+      <div class="section">
+        <div class="section__header">
+          <span class="section__title">Signal &amp; Technicals</span>
+        </div>
+        <div class="grid-2" style="align-items:start;">
+
+          <!-- Signal Card -->
+          <div class="card card--elevated">
+            <div class="card__label">Composite Signal</div>
+            <div style="display:flex; align-items:center; gap:var(--sp-3); margin-bottom:var(--sp-3); flex-wrap:wrap;">
+              <span class="signal-badge signal-badge--hold" id="signal-badge-main">HOLD</span>
+              <span class="text-muted" style="font-size:var(--text-xs);">Confidence: <strong id="signal-confidence" class="text-secondary">—</strong></span>
+            </div>
+            <div class="confidence-bar">
+              <div class="confidence-bar__label">
+                <span>SELL</span><span>HOLD</span><span>BUY</span>
+              </div>
+              <div class="confidence-bar__track">
+                <div class="confidence-bar__fill confidence-bar__fill--hold" id="confidence-fill" style="width:50%"></div>
+              </div>
+            </div>
+            <p style="font-size:var(--text-xs); color:var(--text-muted); margin-top:var(--sp-3); line-height:1.5;" id="signal-reason">
+              Waiting for data...
+            </p>
+          </div>
+
+          <!-- Technicals Card -->
+          <div class="card">
+            <div class="card__label">Technical Indicators</div>
+            <div class="data-row">
+              <span class="data-row__label">RSI (14)</span>
+              <span class="data-row__value"><span id="tech-rsi">—</span> · <span id="tech-rsi-status" class="tag tag--muted">—</span></span>
+            </div>
+            <div class="data-row">
+              <span class="data-row__label">MACD</span>
+              <span class="data-row__value" id="tech-macd">—</span>
+            </div>
+            <div class="data-row">
+              <span class="data-row__label">vs 50-day SMA ($<span id="tech-sma50">—</span>)</span>
+              <span class="data-row__value" id="tech-vs-50">—</span>
+            </div>
+            <div class="data-row">
+              <span class="data-row__label">vs 200-day SMA ($<span id="tech-sma200">—</span>)</span>
+              <span class="data-row__value" id="tech-vs-200">—</span>
+            </div>
+            <div class="data-row">
+              <span class="data-row__label">Key Breakout</span>
+              <span class="data-row__value" id="tech-breakout" style="max-width:200px; text-align:right; line-height:1.4;">—</span>
+            </div>
+            <div style="margin-top:var(--sp-3);">
+              <div style="font-size:var(--text-xs); color:var(--text-muted); margin-bottom:var(--sp-2);">Support Levels</div>
+              <div id="tech-supports" style="display:flex; flex-wrap:wrap; gap:var(--sp-1);"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Row 2: KPI Cards ── -->
+      <div class="section">
+        <div class="section__header">
+          <span class="section__title">Market Metrics</span>
+        </div>
+        <div class="grid-4">
+          <div class="card">
+            <div class="card__label">DXY (Dollar Index)</div>
+            <div class="card__value" id="macro-dxy">—</div>
+            <div class="card__sub" id="macro-dxy-change">—</div>
+          </div>
+          <div class="card">
+            <div class="card__label">Real Rate (10Y TIPS)</div>
+            <div class="card__value" id="macro-real-rate">—</div>
+            <div class="card__sub" id="macro-real-rate-change">—</div>
+          </div>
+          <div class="card">
+            <div class="card__label">Fed Rate Cut Prob.</div>
+            <div class="card__value" id="macro-fed">—</div>
+            <div class="card__sub">CME FedWatch estimate</div>
+          </div>
+          <div class="card">
+            <div class="card__label">PCE Inflation</div>
+            <div class="card__value" id="macro-pce">—</div>
+            <div class="card__sub" id="macro-geo">—</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Row 3: COT + Fundamentals ── -->
+      <div class="section">
+        <div class="section__header">
+          <span class="section__title">Positioning &amp; Fundamentals</span>
+        </div>
+        <div class="grid-2" style="align-items:start;">
+
+          <!-- COT Card -->
+          <div class="card">
+            <div class="card__label">CFTC COT — Silver Futures</div>
+            <div style="font-size:var(--text-xs); color:var(--text-muted); margin-bottom:var(--sp-3);">
+              Report date: <span id="cot-date" class="text-secondary">—</span> &nbsp;·&nbsp; OI: <span id="cot-oi" class="text-secondary font-tabular">—</span>
+            </div>
+            <div class="cot-bar" id="cot-bars">
+              <div class="cot-bar__row">
+                <span class="cot-bar__label">Spec Long</span>
+                <div class="cot-bar__track"><div class="cot-bar__fill cot-bar__fill--green" id="cot-spec-long-bar" style="width:50%"></div></div>
+                <span class="cot-bar__count" id="cot-spec-long">—</span>
+              </div>
+              <div class="cot-bar__row">
+                <span class="cot-bar__label">Spec Short</span>
+                <div class="cot-bar__track"><div class="cot-bar__fill cot-bar__fill--red" id="cot-spec-short-bar" style="width:50%"></div></div>
+                <span class="cot-bar__count" id="cot-spec-short">—</span>
+              </div>
+              <div class="cot-bar__row">
+                <span class="cot-bar__label">Comm Long</span>
+                <div class="cot-bar__track"><div class="cot-bar__fill cot-bar__fill--green" id="cot-comm-long-bar" style="width:50%"></div></div>
+                <span class="cot-bar__count" id="cot-comm-long">—</span>
+              </div>
+              <div class="cot-bar__row">
+                <span class="cot-bar__label">Comm Short</span>
+                <div class="cot-bar__track"><div class="cot-bar__fill cot-bar__fill--red" id="cot-comm-short-bar" style="width:50%"></div></div>
+                <span class="cot-bar__count" id="cot-comm-short">—</span>
+              </div>
+            </div>
+            <div style="margin-top:var(--sp-4);">
+              <div class="data-row">
+                <span class="data-row__label">Spec Net Long</span>
+                <span class="data-row__value" id="cot-spec-net">—</span>
+              </div>
+              <div class="data-row">
+                <span class="data-row__label">Comm Net Short</span>
+                <span class="data-row__value" id="cot-comm-net">—</span>
+              </div>
+              <div class="data-row">
+                <span class="data-row__label">COMEX Registered</span>
+                <span class="data-row__value text-muted" id="cot-comex-reg">—</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Fundamentals Card -->
+          <div class="card">
+            <div class="card__label">Market Fundamentals</div>
+            <div class="data-row">
+              <span class="data-row__label">Market Status</span>
+              <span class="data-row__value text-red" id="fund-status">—</span>
+            </div>
+            <div class="data-row">
+              <span class="data-row__label">2026 Deficit Est.</span>
+              <span class="data-row__value" id="fund-deficit">—</span>
+            </div>
+            <div class="data-row">
+              <span class="data-row__label">Cumulative Deficit</span>
+              <span class="data-row__value" id="fund-cumulative">—</span>
+            </div>
+            <div class="data-row">
+              <span class="data-row__label">Total Supply</span>
+              <span class="data-row__value" id="fund-supply">—</span>
+            </div>
+            <div class="data-row">
+              <span class="data-row__label">Mine Production</span>
+              <span class="data-row__value" id="fund-mine">—</span>
+            </div>
+            <div class="data-row">
+              <span class="data-row__label">Industrial Demand</span>
+              <span class="data-row__value" id="fund-industrial">—</span>
+            </div>
+            <div class="data-row">
+              <span class="data-row__label">Physical Investment</span>
+              <span class="data-row__value" id="fund-physical">—</span>
+            </div>
+            <div style="margin-top:var(--sp-4);">
+              <div style="font-size:var(--text-xs); color:var(--text-muted); margin-bottom:var(--sp-2);">Critical Factors</div>
+              <ul class="factors-list" id="fund-factors"></ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Row 4: Calendar Events + Macro Notes ── -->
+      <div class="section">
+        <div class="section__header">
+          <span class="section__title">Macro &amp; Calendar</span>
+        </div>
+        <div class="grid-2" style="align-items:start;">
+          <div class="card">
+            <div class="card__label">Upcoming Events</div>
+            <ul class="calendar-list" id="calendar-events">
+              <li class="calendar-item"><span class="calendar-item__date text-muted">—</span><span class="calendar-item__event text-muted">No events configured</span></li>
+            </ul>
+          </div>
+          <div class="card">
+            <div class="card__label">Macro Notes</div>
+            <div class="data-row">
+              <span class="data-row__label">Geopolitical</span>
+              <span class="data-row__value" id="macro-geo-detail">—</span>
+            </div>
+            <div class="data-row">
+              <span class="data-row__label">Fed Policy</span>
+              <span class="data-row__value" id="macro-fed-detail">—</span>
+            </div>
+            <p style="font-size:var(--text-xs); color:var(--text-muted); margin-top:var(--sp-4); line-height:1.5;">
+              FRED API provides DXY and real rate data. Configure <code style="color:var(--silver); background:var(--bg-surface); padding:1px 4px; border-radius:3px;">FRED_API_KEY</code> in .env for live macro data.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Row 5: News + Sentiment ── -->
+      <div class="section">
+        <div class="section__header">
+          <span class="section__title">News &amp; Sentiment</span>
+          <span class="section__badge" id="news-count">0 items</span>
+        </div>
+        <div class="grid-2" style="align-items:start;">
+
+          <!-- News Card -->
+          <div class="card">
+            <div class="card__label">Latest Headlines</div>
+            <ul class="news-list" id="news-list">
+              <li style="padding:var(--sp-4); text-align:center; color:var(--text-muted); font-size:var(--text-xs);">Loading news...</li>
+            </ul>
+          </div>
+
+          <!-- Sentiment Card -->
+          <div class="card">
+            <div class="card__label">X/Twitter Sentiment</div>
+            <div style="display:flex; align-items:center; gap:var(--sp-3); margin-bottom:var(--sp-3); flex-wrap:wrap;">
+              <span style="font-size:var(--text-xl); font-weight:700; font-variant-numeric:tabular-nums;" id="sentiment-pct">—</span>
+              <span class="tag tag--muted" id="sentiment-overall">—</span>
+            </div>
+            <p style="font-size:var(--text-xs); color:var(--text-muted); margin-bottom:var(--sp-3); line-height:1.5;" id="sentiment-summary">—</p>
+            <div style="font-size:var(--text-xs); color:var(--text-muted); margin-bottom:var(--sp-2);">Monitored Accounts</div>
+            <div id="sentiment-accounts"></div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /dashboard-content -->
+  </main>
+
+</div><!-- /layout -->
+
+<script src="app.js"></script>
+</body>
+</html>
