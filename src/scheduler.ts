@@ -1,4 +1,3 @@
-import cron from 'node-cron';
 import { config } from './config';
 import { getData, updatePartial } from './store';
 import { fetchPriceData } from './fetchers/price';
@@ -9,11 +8,11 @@ import { fetchSentimentData } from './fetchers/sentiment';
 import { calculateTechnicals } from './fetchers/technicals';
 import { SignalData, DashboardData } from './types';
 
+// ── Signal Scoring ──────────────────────────────────────────────────────────
 function generateSignal(data: Partial<DashboardData>): SignalData {
-  let score = 50; // Start neutral
+  let score = 50;
   const reasons: string[] = [];
 
-  // Price momentum / technicals
   if (data.price && data.technicals) {
     const rsi = data.technicals.rsi14;
     if (rsi > 0) {
@@ -57,7 +56,6 @@ function generateSignal(data: Partial<DashboardData>): SignalData {
     }
   }
 
-  // Day momentum
   if (data.price?.dayChangePct !== undefined) {
     if (data.price.dayChangePct > 1) {
       score += 5;
@@ -68,7 +66,6 @@ function generateSignal(data: Partial<DashboardData>): SignalData {
     }
   }
 
-  // COT positioning
   if (data.positioning) {
     const specNet = data.positioning.specNetLong;
     if (specNet > 50000) {
@@ -83,7 +80,6 @@ function generateSignal(data: Partial<DashboardData>): SignalData {
     }
   }
 
-  // Macro — real rates
   if (data.macro) {
     const realRate = data.macro.realRate10Y;
     if (realRate !== 0) {
@@ -99,7 +95,6 @@ function generateSignal(data: Partial<DashboardData>): SignalData {
       }
     }
 
-    // DXY — inverse correlation
     const dxy = data.macro.dxy;
     if (dxy !== 0) {
       if (dxy < 100) {
@@ -112,7 +107,6 @@ function generateSignal(data: Partial<DashboardData>): SignalData {
     }
   }
 
-  // Cap at 0–100
   score = Math.max(0, Math.min(100, Math.round(score)));
 
   const action: 'BUY' | 'SELL' | 'HOLD' =
@@ -127,13 +121,28 @@ function generateSignal(data: Partial<DashboardData>): SignalData {
   };
 }
 
+// ── Broadcast ───────────────────────────────────────────────────────────────
+function broadcast(data: DashboardData): void {
+  // Lazy import to avoid circular dependency with index.ts
+  try {
+    const { io } = require('./index');
+    if (io) {
+      io.emit('dashboard:update', data);
+      const clientCount = io.engine?.clientsCount ?? 0;
+      console.log(`[WS] Broadcast to ${clientCount} client(s)`);
+    }
+  } catch {
+    // io not ready yet (during first startup tick)
+  }
+}
+
+// ── Refresh ─────────────────────────────────────────────────────────────────
 export async function refreshAll(): Promise<void> {
-  console.log(`[Scheduler] Starting full data refresh at ${new Date().toISOString()}...`);
+  console.log(`[Scheduler] Refreshing at ${new Date().toISOString()}...`);
 
   const existing = getData();
 
   try {
-    // Fetch all data in parallel for speed
     const [priceResult, cotResult, macroResult, newsResult, sentimentResult] =
       await Promise.allSettled([
         fetchPriceData(existing?.price),
@@ -149,24 +158,13 @@ export async function refreshAll(): Promise<void> {
     const newsData = newsResult.status === 'fulfilled' ? newsResult.value : [];
     const sentimentData = sentimentResult.status === 'fulfilled' ? sentimentResult.value : null;
 
-    // Log any failures
-    if (priceResult.status === 'rejected') {
-      console.error('[Scheduler] Price fetch failed:', priceResult.reason);
-    }
-    if (cotResult.status === 'rejected') {
-      console.error('[Scheduler] COT fetch failed:', cotResult.reason);
-    }
-    if (macroResult.status === 'rejected') {
-      console.error('[Scheduler] Macro fetch failed:', macroResult.reason);
-    }
-    if (newsResult.status === 'rejected') {
-      console.error('[Scheduler] News fetch failed:', newsResult.reason);
-    }
+    if (priceResult.status === 'rejected') console.error('[Price] Failed:', priceResult.reason?.message || priceResult.reason);
+    if (cotResult.status === 'rejected') console.error('[COT] Failed:', cotResult.reason?.message || cotResult.reason);
+    if (macroResult.status === 'rejected') console.error('[Macro] Failed:', macroResult.reason?.message || macroResult.reason);
+    if (newsResult.status === 'rejected') console.error('[News] Failed:', newsResult.reason?.message || newsResult.reason);
 
-    // Calculate technicals from live price
     const techData = priceData ? calculateTechnicals(priceData.spot) : null;
 
-    // Build partial update — only replace fields that successfully fetched
     const update: Partial<DashboardData> = {
       lastUpdated: new Date().toISOString(),
     };
@@ -178,7 +176,6 @@ export async function refreshAll(): Promise<void> {
     if (newsData.length > 0) update.news = newsData;
     if (sentimentData) update.sentiment = sentimentData;
 
-    // Fundamentals are mostly static market data — preserve existing or set defaults
     if (existing?.fundamentals) {
       update.fundamentals = existing.fundamentals;
     } else {
@@ -200,34 +197,33 @@ export async function refreshAll(): Promise<void> {
       };
     }
 
-    // Generate composite signal
     update.signal = generateSignal({ ...existing, ...update });
-
     updatePartial(update);
 
+    // Push to all connected WebSocket clients
+    const fullData = getData();
+    if (fullData) broadcast(fullData);
+
     console.log(
-      `[Scheduler] Refresh complete — Silver: $${update.price?.spot ?? 'unchanged'} | Signal: ${update.signal?.action} (${update.signal?.confidence}%)`
+      `[Scheduler] Done — $${update.price?.spot ?? 'unchanged'} | ${update.signal?.action} (${update.signal?.confidence}%)`
     );
   } catch (e) {
-    console.error('[Scheduler] Unexpected error during refresh:', e);
+    console.error('[Scheduler] Unexpected error:', e);
   }
 }
 
+// ── Start ───────────────────────────────────────────────────────────────────
 export function startScheduler(): void {
-  const minutes = config.refreshIntervalMinutes;
+  const seconds = config.refreshIntervalSeconds;
+  const label = seconds >= 60 ? `${Math.round(seconds / 60)} min` : `${seconds}s`;
 
-  // Clamp to valid cron range (1–59 minutes) or use hourly if > 59
-  const validMinutes = Math.min(59, Math.max(1, minutes));
-  const cronExpr = `*/${validMinutes} * * * *`;
-
-  console.log(`[Scheduler] Scheduling data refresh every ${validMinutes} minutes`);
-  console.log(`[Scheduler] Cron expression: ${cronExpr}`);
+  console.log(`[Scheduler] Refresh interval: every ${label} (${seconds}s)`);
 
   // Run immediately on startup
   refreshAll().catch((e) => console.error('[Scheduler] Initial refresh error:', e));
 
-  // Schedule recurring refresh
-  cron.schedule(cronExpr, () => {
-    refreshAll().catch((e) => console.error('[Scheduler] Scheduled refresh error:', e));
-  });
+  // Use setInterval for sub-minute precision
+  setInterval(() => {
+    refreshAll().catch((e) => console.error('[Scheduler] Refresh error:', e));
+  }, seconds * 1000);
 }

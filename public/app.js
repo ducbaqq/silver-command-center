@@ -1,64 +1,101 @@
 /**
  * Silver Command Center — Frontend Application
- * Fetches data from /api/data and dynamically populates all dashboard sections.
+ * Real-time data via WebSocket (socket.io), with REST fallback.
  */
 
 'use strict';
 
 // ── State ──────────────────────────────────────────────────────────────────
 let dashboardData = null;
-let pollInterval = null;
+let socket = null;
 let isRefreshing = false;
 let firstLoadDone = false;
+let updateCount = 0;
 
 // ── DOM References ──────────────────────────────────────────────────────────
 const $ = (id) => document.getElementById(id);
 
 // ── Entry Point ─────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  loadData();
-  // Poll every 30 seconds
-  pollInterval = setInterval(loadData, 30_000);
+  initWebSocket();
 });
 
-// ── Data Fetching ────────────────────────────────────────────────────────────
-async function loadData() {
-  try {
-    setStatusDot('loading');
+// ── WebSocket ───────────────────────────────────────────────────────────────
+function initWebSocket() {
+  setStatusDot('loading');
 
-    const res = await fetch('/api/data');
+  // socket.io client loaded from CDN in index.html
+  socket = io({
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 10000,
+    timeout: 10000,
+  });
 
-    if (res.status === 503) {
-      // Server still initializing — show friendly message
-      if (!firstLoadDone) {
-        showError('Server is still loading data. Retrying automatically...');
-        setStatusDot('loading');
-      }
-      return;
-    }
+  socket.on('connect', () => {
+    console.log('[WS] Connected:', socket.id);
+    setStatusDot('live');
+    hideError();
+  });
 
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-    }
-
-    const data = await res.json();
+  // Main data channel — server pushes on every refresh cycle
+  socket.on('dashboard:update', (data) => {
+    updateCount++;
     dashboardData = data;
-
     hideError();
     populateDashboard(data);
     setStatusDot('live');
     firstLoadDone = true;
 
-  } catch (err) {
-    console.error('[App] Failed to load dashboard data:', err);
+    // Flash the status dot briefly on each update
+    flashDot();
+  });
+
+  socket.on('disconnect', (reason) => {
+    console.log('[WS] Disconnected:', reason);
     setStatusDot('error');
     if (!firstLoadDone) {
-      showError(`Failed to connect to server: ${err.message}. Is the Node.js server running?`);
+      showError('Lost connection to server. Reconnecting...');
     }
+  });
+
+  socket.on('connect_error', (err) => {
+    console.error('[WS] Connection error:', err.message);
+    setStatusDot('error');
+    if (!firstLoadDone) {
+      showError('Cannot connect to server. Is it running? Retrying...');
+      // Fall back to REST on first load
+      fallbackRESTLoad();
+    }
+  });
+
+  socket.on('reconnect', (attemptNumber) => {
+    console.log(`[WS] Reconnected after ${attemptNumber} attempt(s)`);
+    setStatusDot('live');
+    hideError();
+  });
+}
+
+// REST fallback — only used if WebSocket fails on initial page load
+async function fallbackRESTLoad() {
+  try {
+    const res = await fetch('/api/data');
+    if (res.ok) {
+      const data = await res.json();
+      dashboardData = data;
+      hideError();
+      populateDashboard(data);
+      setStatusDot('live');
+      firstLoadDone = true;
+    }
+  } catch {
+    // Will keep retrying via WebSocket reconnection
   }
 }
 
-async function triggerRefresh() {
+// Manual refresh — sends request through WebSocket
+function triggerRefresh() {
   if (isRefreshing) return;
   isRefreshing = true;
 
@@ -67,36 +104,37 @@ async function triggerRefresh() {
     btn.disabled = true;
     btn.textContent = 'Refreshing...';
   }
-
   setStatusDot('loading');
 
-  try {
-    const res = await fetch('/api/refresh', { method: 'POST' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (socket && socket.connected) {
+    socket.emit('dashboard:refresh');
+  } else {
+    // Fallback to REST
+    fetch('/api/refresh', { method: 'POST' }).catch(() => {});
+  }
 
-    // Wait 5 seconds for the refresh to complete, then reload
-    setTimeout(async () => {
-      await loadData();
-      isRefreshing = false;
-      if (btn) {
-        btn.disabled = false;
-        btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.5 6A4.5 4.5 0 1 1 6 1.5c1.2 0 2.3.47 3.1 1.25L10.5 4"/><path d="M10.5 1.5v2.5H8"/></svg> Refresh`;
-      }
-    }, 5000);
-  } catch (err) {
-    console.error('[App] Refresh trigger failed:', err);
+  // Re-enable button after a few seconds (data will arrive via WS)
+  setTimeout(() => {
     isRefreshing = false;
     if (btn) {
       btn.disabled = false;
-      btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.5 6A4.5 4.5 0 1 1 6 1.5c1.2 0 2.3.47 3.1 1.25L10.5 4"/><path d="M10.5 1.5v2.5H8"/></svg> Refresh`;
+      btn.innerHTML = refreshBtnHTML;
     }
-    setStatusDot('error');
-  }
+  }, 3000);
+}
+
+const refreshBtnHTML = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.5 6A4.5 4.5 0 1 1 6 1.5c1.2 0 2.3.47 3.1 1.25L10.5 4"/><path d="M10.5 1.5v2.5H8"/></svg> Refresh`;
+
+// ── Flash dot on update ─────────────────────────────────────────────────────
+function flashDot() {
+  const dot = $('status-dot');
+  if (!dot) return;
+  dot.classList.add('flash');
+  setTimeout(() => dot.classList.remove('flash'), 600);
 }
 
 // ── Main Population ──────────────────────────────────────────────────────────
 function populateDashboard(data) {
-  // Show dashboard, hide loading/error
   const loadingEl = $('loading-state');
   const dashboardEl = $('dashboard-content');
   if (loadingEl) loadingEl.style.display = 'none';
@@ -122,30 +160,28 @@ function populateHeader(data) {
   const updated = new Date(data.lastUpdated);
   const now = new Date();
   const diffMs = now - updated;
-  const diffMins = Math.floor(diffMs / 60000);
+  const diffSecs = Math.floor(diffMs / 1000);
 
   let timeStr;
-  if (diffMins < 1) {
-    timeStr = 'Just updated';
-  } else if (diffMins === 1) {
-    timeStr = '1 min ago';
-  } else if (diffMins < 60) {
-    timeStr = `${diffMins} min ago`;
+  if (diffSecs < 5) {
+    timeStr = 'Just now';
+  } else if (diffSecs < 60) {
+    timeStr = `${diffSecs}s ago`;
+  } else if (diffSecs < 3600) {
+    timeStr = `${Math.floor(diffSecs / 60)} min ago`;
   } else {
     timeStr = updated.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
   }
 
-  el.textContent = `Updated ${timeStr}`;
+  el.textContent = `Updated ${timeStr} · WS${socket?.connected ? ' ✓' : ''}`;
 }
 
 // ── Price Hero ───────────────────────────────────────────────────────────────
 function populatePrice(price, signal) {
   if (!price) return;
 
-  // Spot price
   setText('price-spot', formatPrice(price.spot));
 
-  // Day change
   const isUp = price.dayChange >= 0;
   const isFlat = price.dayChange === 0;
   const changeEl = $('price-change-val');
@@ -165,12 +201,10 @@ function populatePrice(price, signal) {
     pctEl.className = isFlat ? 'text-muted' : (isUp ? 'text-green' : 'text-red');
   }
 
-  // Stats
   setText('gsr', price.goldSilverRatio > 0 ? price.goldSilverRatio.toFixed(1) + ':1' : '—');
   setText('gold-price', price.goldPrice > 0 ? formatPrice(price.goldPrice) : '—');
   setText('ath', price.allTimeHigh > 0 ? formatPrice(price.allTimeHigh) + (price.allTimeHighDate ? ` · ${price.allTimeHighDate}` : '') : '—');
 
-  // Hero signal badge
   if (signal) {
     updateSignalBadge('signal-badge-hero', signal.action);
   }
@@ -184,7 +218,6 @@ function populateSignal(signal) {
   setText('signal-confidence', `${signal.confidence}%`);
   setText('signal-reason', signal.reason || 'No signal reason available.');
 
-  // Confidence bar
   const fill = $('confidence-fill');
   if (fill) {
     fill.style.width = `${signal.confidence}%`;
@@ -204,7 +237,6 @@ function updateSignalBadge(id, action) {
 function populateTechnicals(tech) {
   if (!tech) return;
 
-  // RSI
   const rsi = tech.rsi14;
   const rsiEl = $('tech-rsi');
   if (rsiEl) rsiEl.textContent = rsi > 0 ? rsi.toFixed(1) : 'N/A';
@@ -216,7 +248,6 @@ function populateTechnicals(tech) {
     rsiStatusEl.className = `tag ${rsiClass}`;
   }
 
-  // MACD
   const macdEl = $('tech-macd');
   if (macdEl) {
     macdEl.textContent = tech.macd || '—';
@@ -225,11 +256,9 @@ function populateTechnicals(tech) {
     else macdEl.className = 'data-row__value text-muted';
   }
 
-  // SMA values
   setText('tech-sma50', tech.sma50 > 0 ? tech.sma50.toFixed(2) : '—');
   setText('tech-sma200', tech.sma200 > 0 ? tech.sma200.toFixed(2) : '—');
 
-  // vs SMA
   const vs50El = $('tech-vs-50');
   if (vs50El) {
     vs50El.textContent = tech.priceVs50SMA || '—';
@@ -248,10 +277,8 @@ function populateTechnicals(tech) {
     );
   }
 
-  // Breakout
   setText('tech-breakout', tech.keyBreakout || '—');
 
-  // Support levels
   const supportsEl = $('tech-supports');
   if (supportsEl && tech.supports) {
     supportsEl.innerHTML = tech.supports.map(s =>
@@ -264,7 +291,6 @@ function populateTechnicals(tech) {
 function populateMacro(macro) {
   if (!macro) return;
 
-  // DXY
   const dxyEl = $('macro-dxy');
   if (dxyEl) {
     dxyEl.textContent = macro.dxy > 0 ? macro.dxy.toFixed(2) : 'N/A';
@@ -272,7 +298,6 @@ function populateMacro(macro) {
   }
   setText('macro-dxy-change', macro.dxyChange && macro.dxyChange !== 'N/A' ? `Change: ${macro.dxyChange}` : 'From FRED: DTWEXBGS');
 
-  // Real rate
   const rrEl = $('macro-real-rate');
   if (rrEl) {
     rrEl.textContent = macro.realRate10Y !== 0 ? `${macro.realRate10Y.toFixed(2)}%` : 'N/A';
@@ -280,16 +305,13 @@ function populateMacro(macro) {
   }
   setText('macro-real-rate-change', macro.realRateChange && macro.realRateChange !== 'N/A' ? `Change: ${macro.realRateChange}` : 'From FRED: DFII10');
 
-  // Fed rate cut
   setText('macro-fed', macro.fedRateCut || 'N/A');
   setText('macro-pce', macro.pceInflation || 'N/A');
   setText('macro-geo', macro.geopolitical || '—');
 
-  // Detail fields
   setText('macro-geo-detail', macro.geopolitical || 'No data');
   setText('macro-fed-detail', macro.fedRateCut || 'No data');
 
-  // Calendar events
   const calEl = $('calendar-events');
   if (calEl) {
     if (macro.calendarEvents && macro.calendarEvents.length > 0) {
@@ -315,7 +337,6 @@ function populateCOT(cot) {
   setText('cot-date', cot.reportDate || 'Unknown');
   setText('cot-oi', cot.openInterest > 0 ? cot.openInterest.toLocaleString() : '—');
 
-  // Bars — normalize to max of all 4 values
   const maxVal = Math.max(cot.specLong, cot.specShort, cot.commercialLong, cot.commercialShort, 1);
 
   updateCOTBar('cot-spec-long-bar', 'cot-spec-long', cot.specLong, maxVal, 'green');
@@ -323,7 +344,6 @@ function populateCOT(cot) {
   updateCOTBar('cot-comm-long-bar', 'cot-comm-long', cot.commercialLong, maxVal, 'green');
   updateCOTBar('cot-comm-short-bar', 'cot-comm-short', cot.commercialShort, maxVal, 'red');
 
-  // Net positions
   const specNetEl = $('cot-spec-net');
   if (specNetEl) {
     const net = cot.specNetLong;
@@ -459,7 +479,7 @@ function getStanceClass(stance) {
   if (s.includes('very bear')) return 'text-red';
   if (s.includes('bear')) return 'text-red';
   if (s.includes('unknown') || s.includes('error') || s.includes('require')) return 'text-muted';
-  return 'text-yellow'; // neutral
+  return 'text-yellow';
 }
 
 // ── Grok Integration ──────────────────────────────────────────────────────────
@@ -521,7 +541,6 @@ Please provide:
 4. Your target price range for the next 6-12 months with reasoning
 5. Recommended positioning (aggressive/moderate/conservative) and why`;
 
-  // Open Grok with the prompt
   const grokUrl = `https://x.com/i/grok?text=${encodeURIComponent(prompt)}`;
   window.open(grokUrl, '_blank', 'noopener,noreferrer');
 }
