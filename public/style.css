@@ -73,6 +73,14 @@
 .header__status-dot.live { background: var(--green); box-shadow: 0 0 6px var(--green); }
 .header__status-dot.loading { background: var(--yellow); animation: pulse-dot 1.2s ease-in-out infinite; }
 .header__status-dot.error { background: var(--red); }
+.header__status-dot.flash {
+  animation: flash-dot 0.6s ease-out;
+}
+
+@keyframes flash-dot {
+  0% { transform: scale(1.8); box-shadow: 0 0 12px var(--green); }
+  100% { transform: scale(1); box-shadow: 0 0 6px var(--green); }
+}
 
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; }

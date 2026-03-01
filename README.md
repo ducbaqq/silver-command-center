@@ -1,10 +1,11 @@
 # Silver Command Center
 
-A self-hosted, real-time silver market intelligence dashboard. Pulls live price data, CFTC COT positioning, FRED macro data, and precious metals news — all in one dark-themed dashboard with a composite buy/sell/hold signal.
+A self-hosted, real-time silver market intelligence dashboard. Pulls live price data, CFTC COT positioning, FRED macro data, and precious metals news — all in one dark-themed dashboard with a composite buy/sell/hold signal. **v1.1** adds real-time WebSocket push so every connected browser updates instantly.
 
 ## Features
 
 - **Live silver spot price** — multi-source with automatic fallback (GoldAPI → metals.dev → gold-api.com → MetalPriceAPI)
+- **Real-time WebSocket push** — server fetches from APIs on a configurable interval, then broadcasts to all connected browsers instantly via socket.io
 - **Composite trading signal** — BUY / HOLD / SELL with a confidence score (0–100) derived from technicals, positioning, and macro
 - **Technical analysis** — RSI(14), MACD, 50/200-day SMA calculated from live price history
 - **CFTC COT positioning** — speculator and commercial positions from the official CFTC Socrata API (no key needed)
@@ -13,7 +14,7 @@ A self-hosted, real-time silver market intelligence dashboard. Pulls live price 
 - **X/Twitter sentiment** — stub by default; activates with a bearer token in `.env`
 - **Grok integration** — one-click prompt generation that packages all current data and opens Grok AI for analysis
 - **Persistent storage** — data survives server restarts via JSON file in `/data`
-- **Auto-refresh** — configurable polling interval (default: every 30 minutes)
+- **REST fallback** — if WebSocket fails on initial page load, the client falls back to REST `/api/data`
 
 ---
 
@@ -47,7 +48,7 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-On first startup, the server immediately fetches data from all sources. Price data appears within ~10 seconds. If price APIs are slow, wait up to 30 seconds.
+On first startup, the server immediately fetches data from all sources and pushes the result to your browser via WebSocket. Price data appears within ~10 seconds. The green dot in the header pulses when a new update arrives.
 
 ### 5. Build & run (production)
 
@@ -67,7 +68,7 @@ All configuration is in `.env`. See `.env.example` for defaults.
 | `PORT` | `3000` | HTTP server port |
 | `FRED_API_KEY` | _(empty)_ | FRED API key — required for DXY and real rate data |
 | `X_BEARER_TOKEN` | _(empty)_ | X/Twitter API bearer token — optional, activates live sentiment |
-| `REFRESH_INTERVAL_MINUTES` | `30` | How often to re-fetch all data sources |
+| `REFRESH_INTERVAL_SECONDS` | `300` | How often to fetch from external APIs (in seconds). Data is then pushed to all clients via WebSocket. |
 | `DATA_DIR` | `./data` | Where to persist dashboard data between restarts |
 
 ### Getting a FRED API key (free, 2 minutes)
@@ -114,12 +115,12 @@ Without this, the sentiment section shows placeholders for the 10 monitored silv
 ```
 silver-command-center/
 ├── src/
-│   ├── index.ts          # Express server entry point + startup
+│   ├── index.ts          # Express + HTTP server + socket.io setup
 │   ├── config.ts         # Environment variable loader
 │   ├── types.ts          # All TypeScript interfaces (DashboardData, etc.)
 │   ├── store.ts          # In-memory store + JSON file persistence
 │   ├── routes.ts         # API routes (/api/data, /api/refresh, /api/health)
-│   ├── scheduler.ts      # node-cron scheduler + signal generation
+│   ├── scheduler.ts      # setInterval scheduler + signal generation + WS broadcast
 │   └── fetchers/
 │       ├── price.ts      # Multi-source price fetcher with fallback chain
 │       ├── cot.ts        # CFTC COT data via Socrata public API
@@ -128,23 +129,34 @@ silver-command-center/
 │       ├── technicals.ts # RSI, MACD, SMA calculations from price history
 │       └── sentiment.ts  # X API sentiment stub / live implementation
 ├── public/               # Static frontend (served by Express)
-│   ├── index.html        # Dashboard HTML structure
+│   ├── index.html        # Dashboard HTML structure + socket.io CDN
 │   ├── base.css          # CSS reset + design tokens
-│   ├── style.css         # Component styles
-│   └── app.js            # Dynamic data loading + DOM population
+│   ├── style.css         # Component styles + flash animation
+│   └── app.js            # WebSocket client + DOM population (REST fallback)
 └── data/
     └── dashboard.json    # Persisted data (gitignored)
 ```
 
-### Data flow
+### Data flow (v1.1 — WebSocket)
 
 1. Server starts → `startScheduler()` runs immediately
 2. All fetchers run in parallel (`Promise.allSettled`)
 3. Results merged into `DashboardData` — failed fetchers don't break others
 4. Signal generated from available data
 5. Data written to memory + `data/dashboard.json`
-6. Frontend polls `/api/data` every 30 seconds
-7. JavaScript populates all DOM elements from API response
+6. **`io.emit('dashboard:update', data)` pushes to all connected browsers instantly**
+7. Frontend receives data on the `dashboard:update` event and updates the DOM
+8. The green status dot briefly flashes on each update
+9. If WebSocket is down on initial load, the client falls back to `GET /api/data`
+
+### WebSocket events
+
+| Direction | Event | Payload | Description |
+|---|---|---|---|
+| Server → Client | `dashboard:update` | Full `DashboardData` JSON | Pushed after every API refresh cycle |
+| Client → Server | `dashboard:refresh` | _(none)_ | Triggers an immediate refresh from all data sources |
+
+On first connect, the server immediately sends the current data so the client doesn't wait for the next refresh cycle.
 
 ---
 
@@ -282,10 +294,34 @@ docker run -p 3000:3000 -v $(pwd)/data:/app/data --env-file .env silver-command-
 
 ---
 
+## Changelog
+
+### v1.1 — WebSocket Push (2026-03-01)
+
+- **Real-time WebSocket** — replaced REST polling with socket.io. Server pushes data to all connected clients on every refresh cycle.
+- **Instant first load** — server sends current data immediately when a client connects.
+- **Manual refresh via WebSocket** — the "Refresh" button now sends a WebSocket event instead of a POST request.
+- **Flash animation** — green status dot pulses briefly on each incoming data update.
+- **Configurable refresh in seconds** — `REFRESH_INTERVAL_SECONDS` (default 300) replaces the old `REFRESH_INTERVAL_MINUTES`.
+- **REST fallback** — if WebSocket fails on initial load, the client falls back to `GET /api/data`.
+
+### v1.0 — Initial Release (2026-02-28)
+
+- Multi-source silver price fetching with fallback chain
+- CFTC COT positioning data (no API key needed)
+- FRED macro data (DXY, real rates)
+- RSS news aggregation (Kitco, Google News, SilverSeek)
+- Composite BUY/HOLD/SELL signal engine
+- One-click Grok AI analysis integration
+- Persistent JSON storage
+- Dark-themed responsive dashboard
+
+---
+
 ## Troubleshooting
 
 **"Data not yet loaded" on first visit**
-The server runs all fetchers on startup. Wait ~30 seconds, then refresh. Check terminal logs for `[Price]`, `[COT]`, `[FRED]` entries.
+The server runs all fetchers on startup. Wait ~10 seconds, then the WebSocket should push data to your browser automatically. Check terminal logs for `[Price]`, `[COT]`, `[FRED]` entries.
 
 **Price shows "N/A" or "—"**
 All four price sources failed. Check your internet connection. The demo API keys have rate limits — if you've hit them, wait a few minutes or register for a free API key at [goldapi.io](https://goldapi.io).
@@ -303,10 +339,13 @@ Technicals require price history:
 - 50-day SMA: 50 price points
 - 200-day SMA: 200 price points
 
-At 30-minute intervals, full technical data takes weeks to accumulate. Consider lowering `REFRESH_INTERVAL_MINUTES` (e.g., to `5`) during initial setup.
+At the default 5-minute interval (300s), full technical data takes several days to accumulate. Consider lowering `REFRESH_INTERVAL_SECONDS` (e.g., to `60`) during initial setup.
 
 **X/Twitter sentiment shows "API not configured"**
 Expected behavior — configure `X_BEARER_TOKEN` in `.env` to enable live sentiment.
+
+**WebSocket not connecting**
+Check that no firewall or proxy is blocking WebSocket connections on the server port. The client automatically retries with exponential backoff. If WebSocket is permanently blocked, the dashboard falls back to REST on initial load.
 
 ---
 
